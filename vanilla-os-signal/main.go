@@ -42,9 +42,11 @@ func main() {
 		osSignal := make(chan os.Signal, 1)
 		signal.Notify(osSignal,
 			os.Interrupt,
-			syscall.SIGHUP,
+			os.Kill,
 			syscall.SIGINT,
+			syscall.SIGKILL,
 			syscall.SIGTERM,
+			syscall.SIGHUP,
 			syscall.SIGQUIT,
 		)
 

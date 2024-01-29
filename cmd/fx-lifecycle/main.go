@@ -5,7 +5,7 @@ package main
 
 import (
 	"context"
-	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -15,13 +15,19 @@ import (
 	"github.com/go-redis/redis/v8"
 	"go.uber.org/fx"
 
-	"github.com/koinworks/asgard-heimdal/utils/utinterface"
+	"github.com/luthfikw/example.graceful-shutdown/internal/component"
+	"github.com/luthfikw/example.graceful-shutdown/internal/httprouter"
 )
 
 const API_DURATION = 7 * time.Second
 
 func main() {
 	app := fx.New(
+		fx.Invoke(newComponent1),
+		fx.Invoke(newComponent2),
+		fx.Invoke(newComponent3),
+		fx.Invoke(newComponent4),
+
 		provideRedis(),
 		provideServer(),
 	)
@@ -92,54 +98,8 @@ func newServerConfig() (*serverConfig, error) {
 }
 
 func newServerMux(redisClient *redis.Client) (http.Handler, error) {
-	var mux http.ServeMux
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Printf("server got the request...\n")
-		defer func() {
-			fmt.Printf("server complete the request.\n")
-		}()
-
-		isSlow := utinterface.ToBool(r.URL.Query().Get("slow"), false)
-		if isSlow {
-			time.Sleep(API_DURATION)
-		}
-
-		switch r.Method {
-		case "GET":
-			result := redisClient.Get(r.Context(), "test")
-			if err := result.Err(); err != nil {
-				log.Println(err)
-				w.WriteHeader(500)
-				return
-			}
-
-			w.WriteHeader(200)
-			fmt.Fprintf(w, "Value: %s", result.Val())
-
-		case "POST":
-			var payload struct {
-				Value string `json:"value"`
-			}
-			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-				w.WriteHeader(400)
-				return
-			}
-
-			result := redisClient.Set(r.Context(), "test", payload.Value, time.Hour)
-			if err := result.Err(); err != nil {
-				log.Println(err)
-				w.WriteHeader(500)
-				return
-			}
-
-			w.WriteHeader(200)
-
-		default:
-			w.WriteHeader(404)
-		}
-	})
-
-	return &mux, nil
+	httpHandler := httprouter.NewHTTPServerMux("0", API_DURATION, redisClient)
+	return httpHandler, nil
 }
 
 func runServer(lc fx.Lifecycle, config *serverConfig, handler http.Handler) error {
@@ -180,4 +140,52 @@ func runServer(lc fx.Lifecycle, config *serverConfig, handler http.Handler) erro
 	})
 
 	return nil
+}
+
+func newComponent1(lc fx.Lifecycle) {
+	instance := &component.Component{
+		Label: "component-1",
+	}
+	lc.Append(fx.Hook{
+		OnStop: func(ctx context.Context) error {
+			return instance.Dispose()
+		},
+	})
+}
+
+func newComponent2(lc fx.Lifecycle) {
+	instance := &component.Component{
+		Label:           "component-2",
+		DisposeDuration: time.Second,
+	}
+	lc.Append(fx.Hook{
+		OnStop: func(ctx context.Context) error {
+			return instance.Dispose()
+		},
+	})
+}
+
+func newComponent3(lc fx.Lifecycle) {
+	instance := &component.Component{
+		Label:           "component-3",
+		DisposeDuration: time.Second * 5,
+	}
+	lc.Append(fx.Hook{
+		OnStop: func(ctx context.Context) error {
+			return instance.Dispose()
+		},
+	})
+}
+
+func newComponent4(lc fx.Lifecycle) {
+	instance := &component.Component{
+		Label:           "component-4",
+		DisposeDuration: time.Second * 3,
+		DisposeError:    errors.New("failed to dispose component-4"),
+	}
+	lc.Append(fx.Hook{
+		OnStop: func(ctx context.Context) error {
+			return instance.Dispose()
+		},
+	})
 }
